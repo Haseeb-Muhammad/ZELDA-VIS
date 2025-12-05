@@ -1,0 +1,93 @@
+# Cell Tracking Challenge Evaluation Scripts
+
+This directory contains scripts for evaluating cell segmentation predictions using the Cell Tracking Challenge (CTC) evaluation software.
+
+## Files
+
+- **`run_evaluation.sh`** - Main bash script that orchestrates the evaluation process
+- **`prepare_and_run_evaluation.py`** - Python script that handles file restructuring and evaluation execution
+
+## Requirements
+
+- Python 3
+- Cell Tracking Challenge SEGMeasure executable
+- Ground truth and prediction TIFF images
+
+## Usage
+
+### Basic Usage
+
+```bash
+./run_evaluation.sh <gt_folder> <predictions_folder> <eval_software_path> <dataset_name>
+```
+
+### Arguments
+
+- `gt_folder` - Path to folder containing ground truth images (TIFF format)
+- `predictions_folder` - Path to folder containing prediction images (TIFF format)
+- `eval_software_path` - Path to SEGMeasure executable or its parent directory
+- `dataset_name` - Name of the dataset (used for organizing results)
+
+### Example
+
+```bash
+./run_evaluation.sh \
+    /netscratch/muhammad/ProcessedDatasets/Fluo-N3DH-CHO/test/masks \
+    /netscratch/muhammad/predictions/CHO \
+    /netscratch/muhammad/codes/CellSegmentation/evalSoftware/Linux \
+    Fluo-N3DH-CHO
+```
+
+## What It Does
+
+1. **Validates inputs** - Checks that all paths exist and contain TIFF files
+2. **Restructures files** - Copies and renames files according to CTC naming convention:
+   - Ground truth: `man_seg0000.tif`, `man_seg0001.tif`, ...
+   - Predictions: `mask0000.tif`, `mask0001.tif`, ...
+3. **Runs evaluation** - Executes SEGMeasure on the restructured files
+4. **Saves results** - Stores mapping and evaluation results in organized directory structure
+5. **Cleans up** - Automatically removes temporary files
+
+## Output
+
+Results are saved to: `<eval_software_path>/results/<dataset_name>/`
+
+Output files:
+- `mapping.json` - Maps original filenames to CTC convention names
+- `evaluation_results.txt` - Detailed evaluation metrics from SEGMeasure
+
+## File Naming Convention
+
+The script automatically matches prediction files to ground truth files using:
+1. Exact stem match (e.g., `image001.tif` matches `image001.tif`)
+2. Substring match (e.g., `image001_masks.tif` matches `image001.tif`)
+3. Numeric frame match (extracts numbers from filenames)
+
+## Advanced Options
+
+You can also call the Python script directly for more control:
+
+```bash
+python3 prepare_and_run_evaluation.py \
+    --gt /path/to/gt \
+    --pred /path/to/predictions \
+    --eval /path/to/evalSoftware \
+    --dataset my_dataset \
+    --name TMP \
+    --seq 01 \
+    --digits 4 \
+    --keep-temp
+```
+
+Options:
+- `--name` - Base name for temporary dataset folder (default: TMP)
+- `--seq` - Sequence ID (default: 01)
+- `--digits` - Zero-padding for filenames (default: 4)
+- `--keep-temp` - Preserve temporary folder for debugging
+
+## Notes
+
+- For each prediction file, there should be a corresponding ground truth file
+- Files must be in TIFF format (`.tif` or `.tiff`)
+- The script handles automatic file matching even with different naming patterns
+- Temporary files are automatically cleaned up unless `--keep-temp` is specified
