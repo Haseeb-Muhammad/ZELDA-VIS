@@ -130,13 +130,8 @@ if [ "$PRED_COUNT" -eq 0 ]; then
     exit 1
 fi
 
-# Determine results directory
-if [ -d "$EVAL_SOFTWARE" ]; then
-    RESULTS_DIR="${EVAL_SOFTWARE}/results/${DATASET_NAME}"
-else
-    # If EVAL_SOFTWARE is a file, use its parent directory
-    RESULTS_DIR="$(dirname "$EVAL_SOFTWARE")/results/${DATASET_NAME}"
-fi
+# Determine results directory (in the same directory as this script)
+RESULTS_DIR="${SCRIPT_DIR}/results/${DATASET_NAME}"
 
 print_info "Starting evaluation process..."
 echo ""
@@ -161,6 +156,7 @@ if python3 "$PYTHON_SCRIPT" \
     --pred "$PRED_FOLDER" \
     --eval "$EVAL_SOFTWARE" \
     --dataset "$DATASET_NAME" \
+    --output-dir "$RESULTS_DIR" \
     --name "EVAL" \
     --seq "01" \
     --digits 4 | tee "$TEMP_OUTPUT"; then
