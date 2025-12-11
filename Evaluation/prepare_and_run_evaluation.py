@@ -3,6 +3,10 @@
 Prepare predictions and ground-truths for Cell Tracking Challenge evaluation,
 run the `SEGMeasure` tool, record the filename mapping, and clean up.
 
+The SEGMeasure tool natively supports both 2D and 3D TIFF images without requiring
+any special configuration - it automatically detects the dimensionality from the
+TIFF file structure.
+
 Usage example:
   python3 prepare_and_run_evaluation.py \
     --gt /path/to/gt_folder \
@@ -29,6 +33,9 @@ import subprocess
 import sys
 import tempfile
 from pathlib import Path
+import tifffile
+from tqdm import tqdm
+from calculate_MaP import InstanceSegmentationEvaluator
 
 
 def find_segmeasure(eval_path: Path):
@@ -58,6 +65,98 @@ def extract_last_number(stem: str):
     return None
 
 
+def detect_image_dimensionality(image_path: Path):
+    """
+    Detect if a TIFF image is 2D or 3D for informational purposes.
+    
+    Note: The SEGMeasure evaluation software automatically handles both 2D and 3D
+    images without requiring special configuration. This function is just for
+    providing informative output to the user.
+    
+    Args:
+        image_path: Path to the TIFF file
+        
+    Returns:
+        str: '2D' or '3D' based on image dimensions
+    """
+    try:
+        with tifffile.TiffFile(image_path) as tif:
+            # Get the shape of the first page/series
+            if len(tif.pages) > 1:
+                # Multiple pages typically indicate 3D stack
+                return '3D'
+            else:
+                # Single page - check the shape
+                shape = tif.pages[0].shape
+                if len(shape) == 2 or (len(shape) == 3 and shape[2] <= 4):
+                    # 2D image (H, W) or 2D with channels (H, W, C)
+                    return '2D'
+                else:
+                    # 3D image
+                    return '3D'
+    except Exception as e:
+        print(f"Warning: Could not determine dimensionality of {image_path}: {e}")
+        # Default to 2D as fallback
+        return '2D'
+
+
+def calculate_map_metrics(gt_seg_dir: Path, res_dir: Path) -> dict:
+    """
+    Calculate mean Average Precision (mAP) metrics using the MaP calculator.
+    
+    Args:
+        gt_seg_dir: Directory containing ground truth segmentation files (man_segXXXX.tif)
+        res_dir: Directory containing prediction files (maskXXXX.tif)
+        
+    Returns:
+        Dictionary with mAP results
+    """
+    try:
+        evaluator = InstanceSegmentationEvaluator()
+        
+        # Get all ground truth files
+        gt_files = sorted(gt_seg_dir.glob("man_seg*.tif"))
+        
+        if not gt_files:
+            print("Warning: No ground truth files found for mAP calculation")
+            return {}
+        
+        all_results = []
+        
+        for gt_file in tqdm(gt_files, desc="Calculating mAP", unit="image"):
+            # Extract frame number from man_segXXXX.tif
+            frame_num = gt_file.stem.replace('man_seg', '')
+            pred_file = res_dir / f"mask{frame_num}.tif"
+            
+            if not pred_file.exists():
+                print(f"Warning: No prediction found for {gt_file.name}")
+                continue
+            
+            results = evaluator.evaluate_files(str(pred_file), str(gt_file))
+            results['filename'] = gt_file.name
+            all_results.append(results)
+        
+        # Aggregate results
+        if not all_results:
+            return {}
+        
+        aggregated = {
+            'mAP': sum(r['mAP'] for r in all_results) / len(all_results),
+            'AP50': sum(r['AP50'] for r in all_results) / len(all_results),
+            'AP75': sum(r['AP75'] for r in all_results) / len(all_results),
+            'total_pred': sum(r['n_pred'] for r in all_results),
+            'total_gt': sum(r['n_gt'] for r in all_results),
+            'n_images': len(all_results),
+            'per_image_results': all_results
+        }
+        
+        return aggregated
+        
+    except Exception as e:
+        print(f"Error calculating mAP: {e}")
+        return {}
+
+
 def prepare_temp_structure(gt_dir: Path, pred_dir: Path, seg_exec: str, dataset_name: str,
                            seq='01', digits=4, keep_temp=False, output_dir: Path = None):
     # Create temp dir
@@ -70,6 +169,13 @@ def prepare_temp_structure(gt_dir: Path, pred_dir: Path, seg_exec: str, dataset_
 
     pred_files = sorted([p for p in pred_dir.iterdir() if p.suffix.lower() in ('.tif', '.tiff')])
     gt_files = {p.name: p for p in gt_dir.iterdir() if p.suffix.lower() in ('.tif', '.tiff')}
+    
+    # Detect and report dimensionality for informational purposes
+    # Note: SEGMeasure automatically handles both 2D and 3D images
+    if pred_files:
+        dimensionality = detect_image_dimensionality(pred_files[0])
+        print(f"\n[INFO] Detected image dimensionality: {dimensionality}")
+        print(f"[INFO] SEGMeasure will automatically process {dimensionality} images\n")
 
     mapping = []
     used_numbers = set()
@@ -158,10 +264,52 @@ def prepare_temp_structure(gt_dir: Path, pred_dir: Path, seg_exec: str, dataset_
     # Read and display evaluation results
     log_content = ""
     if eval_log_temp.exists():
-        print("\n=== Evaluation Results ===")
+        print("\n=== SEGMeasure Results ===")
         with eval_log_temp.open('r') as f:
             log_content = f.read()
             print(log_content)
+        print("=" * 30)
+    
+    # Calculate mAP metrics
+    print("\n=== Calculating mAP metrics ===")
+    map_results = calculate_map_metrics(gt_seg_dir, res_dir)
+    
+    if map_results:
+        print(f"mAP: {map_results['mAP']:.6f}")
+        print(f"AP@0.50: {map_results['AP50']:.6f}")
+        print(f"AP@0.75: {map_results['AP75']:.6f}")
+        print(f"Images evaluated: {map_results['n_images']}")
+        print(f"Total predictions: {map_results['total_pred']}")
+        print(f"Total ground truth: {map_results['total_gt']}")
+        print("=" * 30)
+        
+        # Append mAP results to log content
+        map_content = "\n\n=== mAP Metrics ===\n"
+        map_content += f"mAP: {map_results['mAP']:.6f}\n"
+        map_content += f"AP@0.50: {map_results['AP50']:.6f}\n"
+        map_content += f"AP@0.75: {map_results['AP75']:.6f}\n"
+        map_content += f"Images evaluated: {map_results['n_images']}\n"
+        map_content += f"Total predicted instances: {map_results['total_pred']}\n"
+        map_content += f"Total ground truth instances: {map_results['total_gt']}\n"
+        
+        # Add per-image results if available
+        if 'per_image_results' in map_results and map_results['per_image_results']:
+            map_content += "\n=== Per-Image mAP Results ===\n"
+            for img_result in map_results['per_image_results']:
+                map_content += f"\n{img_result['filename']}:\n"
+                map_content += f"  mAP: {img_result['mAP']:.6f}\n"
+                map_content += f"  AP@0.50: {img_result['AP50']:.6f}\n"
+                map_content += f"  AP@0.75: {img_result['AP75']:.6f}\n"
+                map_content += f"  Predicted instances: {img_result['n_pred']}\n"
+                map_content += f"  Ground truth instances: {img_result['n_gt']}\n"
+        
+        log_content += map_content
+        
+        # Write updated log content (SEGMeasure + mAP) back to file
+        with eval_log_temp.open('w') as f:
+            f.write(log_content)
+    else:
+        print("Warning: Could not calculate mAP metrics")
         print("=" * 30)
 
     # Check for per-image results in the RES folder
@@ -182,9 +330,15 @@ def prepare_temp_structure(gt_dir: Path, pred_dir: Path, seg_exec: str, dataset_
         output_dir.mkdir(parents=True, exist_ok=True)
         mapping_file = output_dir / 'mapping.json'
         eval_log = output_dir / 'evaluation_results.txt'
+        map_results_file = output_dir / 'map_results.json'
         
         shutil.copy2(mapping_file_temp, mapping_file)
         shutil.copy2(eval_log_temp, eval_log)
+        
+        # Save mAP results as JSON if available
+        if map_results:
+            with map_results_file.open('w') as f:
+                json.dump(map_results, f, indent=2)
         
         # Copy any result files from the temporary RES folder (excluding image files)
         if res_folder.exists():
@@ -198,6 +352,8 @@ def prepare_temp_structure(gt_dir: Path, pred_dir: Path, seg_exec: str, dataset_
         print(f"Results saved to: {output_dir}")
         print(f"  - Mapping: {mapping_file}")
         print(f"  - Evaluation log: {eval_log}")
+        if map_results:
+            print(f"  - mAP results: {map_results_file}")
     else:
         mapping_file = mapping_file_temp
         eval_log = eval_log_temp

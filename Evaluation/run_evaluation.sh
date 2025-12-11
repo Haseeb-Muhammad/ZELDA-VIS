@@ -20,13 +20,15 @@
 #   1. Validate input arguments and paths
 #   2. Run Python script to restructure files according to CTC naming convention
 #   3. Execute the SEGMeasure evaluation tool
-#   4. Display detailed evaluation results
-#   5. Clean up temporary files automatically
-#   6. Save naming mapping and results to output files
+#   4. Calculate mean Average Precision (mAP) metrics
+#   5. Display detailed evaluation results
+#   6. Clean up temporary files automatically
+#   7. Save naming mapping and results to output files
 #
 # Output files (saved in the same directory as this script):
-#   - evaluation_mapping_<timestamp>.json  - Original to CTC name mapping
-#   - evaluation_results_<timestamp>.txt   - Detailed evaluation metrics
+#   - mapping.json                         - Original to CTC name mapping
+#   - evaluation_results.txt               - SEGMeasure and mAP metrics
+#   - map_results.json                     - Detailed mAP results per image
 #
 ###############################################################################
 
@@ -66,8 +68,6 @@ usage() {
     echo "  eval_software_path   Path to SEGMeasure executable or its parent directory"
     echo "  dataset_name         Name of the dataset (for organizing results)"
     echo ""
-    echo "Example:"
-    echo "  $0 /path/to/ground_truth /path/to/predictions /path/to/evalSoftware/Linux my_dataset"
     exit 1
 }
 
@@ -181,6 +181,7 @@ echo ""
 print_info "Output files:"
 echo "  - Mapping: ${RESULTS_DIR}/mapping.json"
 echo "  - Results: ${RESULTS_DIR}/evaluation_results.txt"
+echo "  - mAP Results: ${RESULTS_DIR}/map_results.json"
 echo ""
 
 # Display summary of results if available
